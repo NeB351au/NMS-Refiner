@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>NMS Refiner</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#111111">
+</head>
+<body>
+  <div class="wrap">
+<header class="row" style="flex-direction:column; align-items:center; text-align:center; margin-top:12px;">
+  <h1 style="margin:0;">NMS Refiner</h1>
+  <div id="status" class="muted" style="margin-top:4px; visibility:hidden;">Loading recipes…</div>
+</header>
+    <!-- Controls Panel -->
+<section class="card" style="margin-top:12px;">
+  <!-- Search bar -->
+  <div class="row">
+    <input id="q" type="search" placeholder="Start typing to see matching refining combos." autofocus/>
+  </div>
+
+  <!-- Mode buttons -->
+  <div class="row" style="margin-top:8px;">
+    <button class="btn" data-mode="all">All</button>
+    <button class="btn" data-mode="byInput">I have</button>
+    <button class="btn" data-mode="byOutput">I want to refine</button>
+    <button class="btn" id="btnFavs" title="Show favourites">Favourites</button>
+  </div>
+
+  <!-- Refiner size buttons -->
+  <div class="row" style="margin-top:8px;">
+    <button class="btn" data-refiner="all">All</button>
+    <button class="btn" data-refiner="portable">Portable</button>
+    <button class="btn" data-refiner="medium">Medium</button>
+    <button class="btn" data-refiner="large">Large</button>
+  </div>
+</section>
+
+
+    <!-- Results Panel (boxed like the top) -->
+    <section class="card" style="margin-top:12px;">
+      <div id="count" class="muted">Type to search…</div>
+      <div id="hint" class="hint">Start typing to see matching refining combos.</div>
+      <div id="grid" class="grid" style="margin-top:8px;"></div>
+    </section>
+
+    <footer></footer>
+  </div>
+
+<script>
+let DATA_RAW = [];
+let DATA = [];
+const favKey = "nms_refiner_favs";
+let FAVS = [];
+try { FAVS = JSON.parse(localStorage.getItem(favKey) || "[]"); } catch {}
+let MODE = "all";
+let REFINER = "all";
+let SHOW_FAVS = false; // favourites view toggle
+
+const $ = (id) => document.getElementById(id);
+const $status = $("status");
+
+/* ---------- Normalization ---------- */
+function deDupPhrase(s) {
+  s = String(s || "").trim().replace(/\s+/g, " ");
+  if (!s) return s;
+  const parts = s.split(" ");
+  if (parts.length % 2 === 0) {
+    const mid = parts.length / 2;
+    const a = parts.slice(0, mid).join(" ").toLowerCase();
+    const b = parts.slice(mid).join(" ").toLowerCase();
+    if (a === b) return parts.slice(0, mid).join(" ");
+  }
+  const uniq = new Set(parts.map(p => p.toLowerCase()));
+  if (parts.length > 1 && uniq.size === 1) return parts[0];
+  return s;
+}
+function parseEmbeddedQtyName(raw) {
+  if (!raw) return { name: "", mult: 1 };
+  let s = String(raw).trim();
+  let mult = 1;
+  const m = s.match(/^(.*?)[\s]*[x×]\s*(\d+)\s*$/i);
+  if (m) { s = m[1].trim(); mult = parseInt(m[2], 10) || 1; }
+  s = deDupPhrase(s);
+  return { name: s, mult };
+}
+function normaliseRecipe(r) {
+  const merged = new Map();
+  (r.inputs || []).forEach(inp => {
+    const { name, mult } = parseEmbeddedQtyName(inp.item);
+    const qty = (parseInt(inp.qty, 10) || 1) * mult;
+    if (!name) return;
+    merged.set(name, (merged.get(name) || 0) + qty);
+  });
+  const inputs = Array.from(merged.entries()).map(([name, qty]) => ({ item: name, qty }));
+  const out = r.output || { item: "", qty: 1 };
+  const { name: outName, mult: outMult } = parseEmbeddedQtyName(out.item);
+  const output = { item: outName, qty: (parseInt(out.qty, 10) || 1) * outMult };
+  return { ...r, inputs, output };
+}
+
+/* ---------- Buttons state ---------- */
+function setActiveButtons() {
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === MODE));
+  document.querySelectorAll('[data-refiner]').forEach(b => b.classList.toggle('active', b.dataset.refiner === REFINER));
+  const favBtn = $("btnFavs");
+  if (favBtn) favBtn.classList.toggle("active", SHOW_FAVS);
+}
+
+/* ---------- Icon plumbing ---------- */
+function slugify(name){
+  return String(name||"")
+    .toLowerCase()
+    .replace(/['’]/g,"")
+    .replace(/[^a-z0-9]+/g,"-")
+    .replace(/^-+|-+$/g,"");
+}
+function iconUrl(name){ return `assets/icons/${slugify(name)}.png`; }
+function makeIcon(name){
+  const holder = document.createElement('span');
+  holder.className = 'ico';
+  const url = iconUrl(name);
+  if (!name) return holder;
+  const img = new Image();
+  img.onload = () => {
+    const wrap = document.createElement('span');
+    wrap.className = 'ico img';
+    wrap.appendChild(img);
+    holder.replaceWith(wrap);
+  };
+  img.onerror = () => {};
+  img.src = url; img.alt = String(name); img.width = 18; img.height = 18;
+  return holder;
+}
+
+/* ---------- UI helpers ---------- */
+function badge(txt, cls) {
+  const span = document.createElement('span');
+  span.className = 'badge' + (cls ? ' ' + cls : '');
+  span.textContent = txt;
+  return span;
+}
+function normStr(s){return String(s||"").toLowerCase().replace(/[:\-_,.()]/g," ").replace(/\s+/g," ").trim();}
+function toTokens(s){return normStr(s).split(" ").filter(Boolean);}
+
+/* ---------- Cards ---------- */
+function recipeCard(r) {
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const top = document.createElement('div');
+  top.className = 'row';
+  top.style.justifyContent = 'space-between';
+
+  const left = document.createElement('div');
+  left.className = 'row';
+  const n = (r.inputs || []).length;
+  const refType = n === 1 ? "Portable Refiner" : n === 2 ? "Medium Refiner" : n >= 3 ? "Large Refiner" : "Unknown";
+  const refClass = n === 1 ? "portable" : n === 2 ? "medium" : n >= 3 ? "large" : "";
+  left.append(badge(refType, refClass));
+
+  const fav = document.createElement('button');
+  fav.className = 'btn';
+  fav.textContent = FAVS.includes(r.id) ? "★ Favourited" : "☆ Favourite";
+  if (FAVS.includes(r.id)) fav.classList.add('active');
+  fav.onclick = () => {
+    if (FAVS.includes(r.id)) FAVS = FAVS.filter(x => x !== r.id);
+    else FAVS.push(r.id);
+    localStorage.setItem(favKey, JSON.stringify(FAVS));
+    render();
+  };
+  top.append(left, fav);
+
+  const inputsLabel = document.createElement('div');
+  inputsLabel.className = 'muted';
+  inputsLabel.style.marginTop = '8px';
+  inputsLabel.textContent = 'Inputs';
+  const inputsWrap = document.createElement('div');
+  inputsWrap.className = 'row';
+  (r.inputs || []).forEach(inp => {
+    const pill = document.createElement('span');
+    pill.className = 'pill';
+    pill.append(makeIcon(inp.item));
+    const lbl = document.createElement('span');
+    lbl.textContent = `${inp.qty}× ${inp.item}`;
+    pill.append(lbl);
+    inputsWrap.append(pill);
+  });
+
+  const outLabel = document.createElement('div');
+  outLabel.className = 'muted';
+  outLabel.style.marginTop = '8px';
+  outLabel.textContent = 'Output';
+  const outWrap = document.createElement('div');
+  outWrap.className = 'row';
+  const opill = document.createElement('span');
+  opill.className = 'pill';
+  opill.append(makeIcon(r.output.item));
+  const olbl = document.createElement('span');
+  olbl.textContent = `${r.output.qty}× ${r.output.item}`;
+  opill.append(olbl);
+  outWrap.append(opill);
+
+  card.append(top, inputsLabel, inputsWrap, outLabel, outWrap);
+  return card;
+}
+
+/* ---------- Search helpers ---------- */
+function haystackForRecipe(r){return normStr([r.output?.item||"",...(r.inputs||[]).map(i=>i.item||"")].join(" "));}
+function tokenMatch(tokens,text){text=String(text||"").toLowerCase();return tokens.every(tok=>text.includes(tok));}
+function expandQuery(q){
+  const base=normStr(q);const alts={[base]:1};
+  const toks=base.split(" ").filter(Boolean);
+  if(toks.length===2)alts[toks[1]+" "+toks[0]]=1;
+  if(base.indexOf(":")===-1&&toks.length>=2)alts[toks[0]+":"+" "+toks.slice(1).join(" ")]=1;
+  return Object.keys(alts);
+}
+
+/* ---------- Filtering ---------- */
+function filterData(){
+  const qraw=($("q").value||"").trim();
+  let filtered=DATA;
+
+  const queries=expandQuery(qraw).map(toTokens);
+  if(qraw){
+    filtered=filtered.filter(r=>{
+      if(MODE==="byOutput")return queries.some(t=>tokenMatch(t,r.output?.item||""));
+      if(MODE==="byInput") return queries.some(t=>tokenMatch(t,(r.inputs||[]).map(i=>i.item).join(" ")));
+      return queries.some(t=>tokenMatch(t,haystackForRecipe(r)));
+    });
+  }
+
+  // Refiner size filter
+  filtered=filtered.filter(r=>{
+    const c=(r.inputs||[]).length;
+    if(REFINER==="portable")return c===1;
+    if(REFINER==="medium")return c===2;
+    if(REFINER==="large")return c>=3;
+    return true;
+  });
+
+  // Favourites view filter (last)
+  if (SHOW_FAVS) {
+    const favSet = new Set(FAVS);
+    filtered = filtered.filter(r => favSet.has(r.id));
+  }
+
+  return filtered;
+}
+
+/* ---------- Render & Load ---------- */
+function render(){
+  setActiveButtons();
+  const list=filterData();
+  const grid=$("grid");
+  const count=$("count");
+  const hint=$("hint");
+  const needle=($("q").value||"").trim();
+
+  if(!needle && REFINER==="all" && !SHOW_FAVS){
+    count.textContent="Type to search…";
+    hint.style.display="block";
+    grid.innerHTML="";
+    return;
+  }
+
+  hint.style.display="none";
+  const favSuffix = SHOW_FAVS ? " (favourites)" : "";
+  count.textContent=`Showing ${list.length} recipe${list.length===1?"":"s"}${favSuffix}`;
+  grid.innerHTML="";list.forEach(r=>grid.append(recipeCard(r)));
+}
+
+async function loadData(){
+  try{
+    const res=await fetch('recipes.json',{cache:'no-store'});
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    DATA_RAW=await res.json();
+    DATA=DATA_RAW.map(normaliseRecipe);
+    $status.textContent=`Loaded ${DATA.length} recipes from recipes.json`;
+  }catch(e){$status.textContent=`Could not load recipes.json (${e.message})`;}
+}
+
+document.addEventListener('click',e=>{
+  const m=e.target.closest('[data-mode]');
+  const r=e.target.closest('[data-refiner]');
+  if(m){MODE=m.dataset.mode;render();}
+  if(r){REFINER=r.dataset.refiner;render();}
+});
+$("q").addEventListener('input',render);
+
+// Favourites view toggle
+$("btnFavs").addEventListener('click', () => {
+  SHOW_FAVS = !SHOW_FAVS;
+  render();
+});
+
+(async function init(){await loadData();render();})();
+</script>
+
+\\Service Worker
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js");
+  });
+}
+</script>
+</body>
+</html>
