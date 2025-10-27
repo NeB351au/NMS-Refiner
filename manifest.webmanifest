@@ -26,9 +26,10 @@
   "screenshots": [
     {
       "src": "assets/screenshot1.png",
-      "sizes": "1080x1920",
+      "sizes": "616x549",
       "type": "image/png",
       "label": "Main app view"
     }
   ]
 }
+
