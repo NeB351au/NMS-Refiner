@@ -8,7 +8,7 @@
   "orientation": "portrait",
   "background_color": "#000000",
   "theme_color": "#0a0a0a",
-  "description": "A No Man's Sky refining refiner tool.",
+  "description": "A No Man's Sky refining calculator and item reference tool.",
   "icons": [
     {
       "src": "assets/icons/refining-192.png",
@@ -25,16 +25,10 @@
   ],
   "screenshots": [
     {
-      "src": "assets/icons/refining-512.png",
-      "sizes": "512x512",
+      "src": "assets/screenshot1.png",
+      "sizes": "1080x1920",
       "type": "image/png",
-      "label": "NMS Refiner main view"
-    },
-    {
-      "src": "assets/icons/refining-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "label": "Refining recipe list"
+      "label": "Main app view"
     }
   ]
 }
