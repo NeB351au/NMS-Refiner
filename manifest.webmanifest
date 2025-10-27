@@ -11,13 +11,13 @@
   "description": "A No Man's Sky refining calculator and item reference tool.",
   "icons": [
     {
-      "src": "assets/icons/activated-cadmium.png",
+      "src": "assets/icons/refining-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "assets/icons/activated-cadmium.png",
+      "src": "assets/icons/refining-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
