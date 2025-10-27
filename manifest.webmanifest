@@ -8,7 +8,7 @@
   "orientation": "portrait",
   "background_color": "#000000",
   "theme_color": "#0a0a0a",
-  "description": "A No Man's Sky refining calculator and item reference tool.",
+  "description": "A No Man's Sky refining reference tool.",
   "icons": [
     {
       "src": "assets/icons/refining-192.png",
@@ -32,4 +32,5 @@
     }
   ]
 }
+
 
